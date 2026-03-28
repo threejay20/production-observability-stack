@@ -116,9 +116,11 @@ groups:
 
       - alert: ContainerHighMemoryUsage
         expr: |
-          container_memory_usage_bytes{name!=""} /
-          container_spec_memory_limit_bytes{name!="", container_spec_memory_limit_bytes > 0}
-          * 100 > 85
+          (
+            container_memory_usage_bytes{name!=""}
+            /
+            (container_spec_memory_limit_bytes{name!=""} > 0)
+          ) * 100 > 85
         for: 5m
         labels:
           severity: warning
