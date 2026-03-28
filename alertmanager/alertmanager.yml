@@ -97,7 +97,7 @@ receivers:
 
   - name: 'slack-critical'
     slack_configs:
-      - api_url: 'YOUR_SLACK_WEBHOOK_URL_CRITICAL'
+      - api_url: 'https://hooks.slack.com/services/YOUR_WORKSPACE/YOUR_CHANNEL_CRITICAL/YOUR_TOKEN'
         channel: '#alerts-critical'
         send_resolved: true
         icon_emoji: ':red_circle:'
@@ -115,7 +115,7 @@ receivers:
 
   - name: 'slack-warning'
     slack_configs:
-      - api_url: 'YOUR_SLACK_WEBHOOK_URL_WARNING'
+      - api_url: 'https://hooks.slack.com/services/YOUR_WORKSPACE/YOUR_CHANNEL_WARNING/YOUR_TOKEN'
         channel: '#alerts-warning'
         send_resolved: true
         icon_emoji: ':warning:'
@@ -130,7 +130,7 @@ receivers:
 
   - name: 'slack-info'
     slack_configs:
-      - api_url: 'YOUR_SLACK_WEBHOOK_URL_INFO'
+      - api_url: 'https://hooks.slack.com/services/YOUR_WORKSPACE/YOUR_CHANNEL_INFO/YOUR_TOKEN'
         channel: '#alerts-info'
         send_resolved: true
         icon_emoji: ':information_source:'
