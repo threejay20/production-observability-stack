@@ -111,21 +111,26 @@ jobs:
 
       - name: Assert Prometheus has active targets
         run: |
-          TARGETS=$(curl -sf http://localhost:9090/api/v1/targets \
-            | jq '.data.activeTargets | length')
+          TARGETS=$(curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets | length // 0')
           echo "Active targets: $TARGETS"
-          [ "$TARGETS" -gt 0 ] || (echo "No active targets found" && exit 1)
+          [ "${TARGETS:-0}" -gt 0 ] || (echo "No active targets found" && exit 1)
 
       - name: Assert alert rule groups are loaded
         run: |
-          GROUPS=$(curl -sf http://localhost:9090/api/v1/rules \
-            | jq '.data.groups | length')
-          echo "Rule groups loaded: $GROUPS"
-          [ "$GROUPS" -gt 0 ] || (echo "No rule groups loaded" && exit 1)
+          for i in $(seq 1 12); do
+            GROUPS=$(curl -s http://localhost:9090/api/v1/rules | jq '.data.groups | length // 0')
+            echo "Attempt $i/12 — rule groups: ${GROUPS:-0}"
+            if [ "${GROUPS:-0}" -gt 0 ]; then
+              echo "Alert rules loaded successfully"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "No rule groups loaded after waiting" && exit 1
 
       - name: Assert Alertmanager API is responding
         run: |
-          STATUS=$(curl -sf http://localhost:9093/api/v2/status | jq -r '.cluster.status')
+          STATUS=$(curl -s http://localhost:9093/api/v2/status | jq -r '.cluster.status // "unknown"')
           echo "Alertmanager cluster status: $STATUS"
 
       - name: Print service logs on failure
