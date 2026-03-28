@@ -28,10 +28,10 @@ jobs:
       - name: promtool check config
         run: promtool check config prometheus/prometheus.yml
 
-      - name: promtool check rules — app-alerts
+      - name: promtool check rules - app-alerts
         run: promtool check rules prometheus/rules/app-alerts.yml
 
-      - name: promtool check rules — node-alerts
+      - name: promtool check rules - node-alerts
         run: promtool check rules prometheus/rules/node-alerts.yml
 
   smoke-test:
@@ -61,7 +61,7 @@ jobs:
               echo "Alertmanager healthy"
               exit 0
             fi
-            echo "Attempt $i/24 — waiting..."
+            echo "Attempt $i/24 - waiting..."
             sleep 5
           done
           echo "Alertmanager did not become healthy" && exit 1
@@ -73,7 +73,7 @@ jobs:
               echo "Prometheus healthy"
               exit 0
             fi
-            echo "Attempt $i/24 — waiting..."
+            echo "Attempt $i/24 - waiting..."
             sleep 5
           done
           echo "Prometheus did not become healthy" && exit 1
@@ -81,11 +81,12 @@ jobs:
       - name: Wait for Loki
         run: |
           for i in $(seq 1 24); do
-            if curl -sf http://localhost:3100/ready 2>&1 | grep -q "ready"; then
+            LOKI_STATUS=$(curl -s http://localhost:3100/ready 2>/dev/null || echo "")
+            if echo "$LOKI_STATUS" | grep -q "ready"; then
               echo "Loki ready"
               exit 0
             fi
-            echo "Attempt $i/24 — waiting..."
+            echo "Attempt $i/24 - waiting..."
             sleep 5
           done
           echo "Loki did not become ready" && exit 1
@@ -98,7 +99,7 @@ jobs:
               echo "Grafana healthy: $STATUS"
               exit 0
             fi
-            echo "Attempt $i/36 — waiting..."
+            echo "Attempt $i/36 - waiting..."
             sleep 5
           done
           echo "Grafana did not become healthy" && exit 1
@@ -119,7 +120,7 @@ jobs:
         run: |
           for i in $(seq 1 12); do
             GROUPS=$(curl -s http://localhost:9090/api/v1/rules 2>/dev/null | jq -r '.data.groups | length // 0' 2>/dev/null || echo "0")
-            echo "Attempt $i/12 — rule groups: ${GROUPS:-0}"
+            echo "Attempt $i/12 - rule groups: ${GROUPS:-0}"
             if [ "${GROUPS:-0}" -gt 0 ]; then
               echo "Alert rules loaded successfully"
               exit 0
