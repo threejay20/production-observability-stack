@@ -1,0 +1,153 @@
+# ============================================================
+# Alertmanager configuration
+#
+# Routes:
+#   - Critical alerts -> PagerDuty (immediate page)
+#   - Warning alerts  -> Slack #alerts-warning
+#   - All others      -> Slack #alerts-info
+#
+# Note: Webhook URLs and API keys below are PLACEHOLDERS.
+# Replace with real values via environment variables or
+# a secrets manager. Never commit real credentials.
+# ============================================================
+
+global:
+  # Default SMTP settings (placeholder — replace with real SMTP)
+  smtp_smarthost:    'smtp.example.com:587'
+  smtp_from:         'alertmanager@example.com'
+  smtp_auth_username: 'alertmanager@example.com'
+  smtp_auth_password: 'YOUR_SMTP_PASSWORD'
+
+  # How long Alertmanager keeps data between restarts
+  resolve_timeout: 5m
+
+# ---- Templates ----
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# ---- Routing tree ----
+route:
+  # Default receiver for unmatched alerts
+  receiver: 'slack-info'
+
+  # Group alerts by these labels before sending
+  group_by: ['alertname', 'cluster', 'environment']
+
+  # Wait for more alerts to arrive before sending the first notification
+  group_wait: 30s
+
+  # Wait before sending notification for a group that has already fired
+  group_interval: 5m
+
+  # Wait before re-sending a notification for an alert that is already firing
+  repeat_interval: 4h
+
+  routes:
+    # ---- Critical: immediate page ----
+    - match:
+        severity: critical
+      receiver: 'pagerduty-critical'
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      continue: true  # also send to Slack
+
+    # ---- Critical: also notify Slack ----
+    - match:
+        severity: critical
+      receiver: 'slack-critical'
+      group_wait: 10s
+
+    # ---- Warning: Slack channel ----
+    - match:
+        severity: warning
+      receiver: 'slack-warning'
+      group_interval: 10m
+      repeat_interval: 6h
+
+
+# ---- Inhibition rules ----
+inhibit_rules:
+  # If a critical alert is firing, suppress the matching warning
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+  # If a node is down, suppress all its application alerts
+  - source_match:
+      alertname: 'NodeDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']
+
+# ---- Receivers ----
+receivers:
+
+  - name: 'null'
+    # Intentionally empty — used to suppress alerts
+
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_INTEGRATION_KEY'
+        send_resolved: true
+        description: '{{ template "pagerduty.default.description" . }}'
+        severity: '{{ if eq .GroupLabels.severity "critical" }}critical{{ else }}warning{{ end }}'
+
+  - name: 'slack-critical'
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL_CRITICAL'
+        channel: '#alerts-critical'
+        send_resolved: true
+        icon_emoji: ':red_circle:'
+        username: 'Alertmanager'
+        title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Severity:* {{ .Labels.severity }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          {{ if .Annotations.runbook }}*Runbook:* {{ .Annotations.runbook }}{{ end }}
+          {{ end }}
+
+  - name: 'slack-warning'
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL_WARNING'
+        channel: '#alerts-warning'
+        send_resolved: true
+        icon_emoji: ':warning:'
+        username: 'Alertmanager'
+        title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Severity:* {{ .Labels.severity }}
+          *Summary:* {{ .Annotations.summary }}
+          {{ end }}
+
+  - name: 'slack-info'
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL_INFO'
+        channel: '#alerts-info'
+        send_resolved: true
+        icon_emoji: ':information_source:'
+        username: 'Alertmanager'
+        title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  - name: 'email-oncall'
+    email_configs:
+      - to: 'oncall@example.com'
+        send_resolved: true
+        headers:
+          Subject: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }} — {{ .CommonLabels.cluster }}'
+        html: |
+          <h2>Alert: {{ .GroupLabels.alertname }}</h2>
+          {{ range .Alerts }}
+          <p><strong>Summary:</strong> {{ .Annotations.summary }}</p>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <p><strong>Instance:</strong> {{ .Labels.instance }}</p>
+          {{ end }}

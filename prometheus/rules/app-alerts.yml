@@ -1,0 +1,175 @@
+---
+groups:
+  # ============================================================
+  # Application-level alerts
+  # ============================================================
+  - name: app.alerts
+    interval: 15s
+    rules:
+
+      # ---- Target availability ----
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: app
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: >
+            The scrape target {{ $labels.instance }} for job {{ $labels.job }}
+            has been unreachable for more than 1 minute.
+
+      # ---- HTTP error rates ----
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (job, instance)
+          /
+          sum(rate(http_requests_total[5m])) by (job, instance)
+          > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          team: app
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.job }}"
+          description: >
+            More than 5% of requests are returning 5xx responses on {{ $labels.instance }}.
+            Current rate: {{ $value | printf "%.2f" }}%.
+
+      - alert: CriticalHTTPErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (job, instance)
+          /
+          sum(rate(http_requests_total[5m])) by (job, instance)
+          > 0.25
+        for: 1m
+        labels:
+          severity: critical
+          team: app
+        annotations:
+          summary: "Critical 5xx error rate on {{ $labels.job }}"
+          description: >
+            More than 25% of requests are failing on {{ $labels.instance }}.
+            Immediate investigation required.
+
+      # ---- Latency (SLO-style) ----
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job, instance)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: app
+        annotations:
+          summary: "P95 latency above 500ms on {{ $labels.job }}"
+          description: >
+            95th percentile response time on {{ $labels.instance }} has exceeded
+            500ms for 5 minutes. Current: {{ $value | printf "%.3f" }}s.
+
+      - alert: CriticalP99Latency
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job, instance)
+          ) > 2.0
+        for: 3m
+        labels:
+          severity: critical
+          team: app
+        annotations:
+          summary: "P99 latency above 2s on {{ $labels.job }}"
+          description: >
+            99th percentile response time is above 2 seconds.
+            SLO breach is likely. Current: {{ $value | printf "%.3f" }}s.
+
+      # ---- Traffic / saturation ----
+      - alert: TrafficSpike
+        expr: |
+          sum(rate(http_requests_total[5m])) by (job)
+          >
+          sum(rate(http_requests_total[1h] offset 1d)) by (job) * 2
+        for: 3m
+        labels:
+          severity: warning
+          team: app
+        annotations:
+          summary: "Traffic spike detected on {{ $labels.job }}"
+          description: >
+            Request rate has doubled compared to the same time yesterday.
+
+      # ---- Container resource alerts ----
+      - alert: ContainerHighCPUUsage
+        expr: |
+          sum(rate(container_cpu_usage_seconds_total{name!=""}[5m])) by (name) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Container {{ $labels.name }} CPU above 80%"
+          description: >
+            Container CPU usage is {{ $value | printf "%.1f" }}%.
+
+      - alert: ContainerHighMemoryUsage
+        expr: |
+          container_memory_usage_bytes{name!=""} /
+          container_spec_memory_limit_bytes{name!="", container_spec_memory_limit_bytes > 0}
+          * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Container {{ $labels.name }} memory above 85% of limit"
+          description: >
+            Container memory usage is {{ $value | printf "%.1f" }}% of its limit.
+
+      # Uses cAdvisor container_oom_events_total — correct metric for Docker Compose environments.
+      # (kube_pod_container_status_last_terminated_reason is kube-state-metrics only and
+      #  requires a Kubernetes cluster — not applicable here.)
+      - alert: ContainerOOMKilled
+        expr: |
+          increase(container_oom_events_total{name!=""}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Container {{ $labels.name }} was OOM killed"
+          description: >
+            Container {{ $labels.name }} triggered an OOM kill event in the last 5 minutes.
+            Increase the container memory limit or investigate the memory leak.
+
+  # ============================================================
+  # Recording rules — pre-computed aggregates for dashboard performance
+  # ============================================================
+  - name: app.recording
+    rules:
+
+      - record: job:http_requests:rate5m
+        expr: sum(rate(http_requests_total[5m])) by (job)
+
+      - record: job:http_errors:rate5m
+        expr: sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (job)
+
+      - record: job:http_error_ratio:rate5m
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (job)
+          /
+          sum(rate(http_requests_total[5m])) by (job)
+
+      - record: job:http_request_duration_seconds:p50_5m
+        expr: |
+          histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+      - record: job:http_request_duration_seconds:p95_5m
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+
+      - record: job:http_request_duration_seconds:p99_5m
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))

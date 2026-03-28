@@ -1,0 +1,158 @@
+---
+groups:
+  # ============================================================
+  # Node / Host alerts
+  # ============================================================
+  - name: node.alerts
+    interval: 30s
+    rules:
+
+      # ---- CPU ----
+      - alert: NodeHighCPULoad
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High CPU load on {{ $labels.instance }}"
+          description: >
+            CPU utilization on {{ $labels.instance }} has been above 80%
+            for more than 5 minutes. Current value: {{ $value | printf "%.1f" }}%.
+          runbook: "https://github.com/OWNER/production-observability-stack/wiki/runbooks/high-cpu"
+          dashboard: "http://localhost:3000/d/node-overview"
+
+      - alert: NodeCriticalCPULoad
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Critical CPU load on {{ $labels.instance }}"
+          description: >
+            CPU utilization is above 95% for 2 minutes. Immediate investigation required.
+            Current: {{ $value | printf "%.1f" }}%.
+
+      # ---- Memory ----
+      - alert: NodeHighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: >
+            Memory usage on {{ $labels.instance }} is above 85% for more than 5 minutes.
+            Available: {{ $value | printf "%.1f" }}% used.
+
+      - alert: NodeCriticalMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Critical memory usage on {{ $labels.instance }}"
+          description: >
+            Memory usage exceeds 95%. OOM kill risk is imminent.
+
+      # ---- Disk ----
+      - alert: NodeDiskUsageWarning
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|devtmpfs"} /
+               node_filesystem_size_bytes{fstype!~"tmpfs|overlay|devtmpfs"})) * 100 > 75
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Disk usage above 75% on {{ $labels.instance }}"
+          description: >
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }}
+            is {{ $value | printf "%.1f" }}% full.
+
+      - alert: NodeDiskUsageCritical
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|devtmpfs"} /
+               node_filesystem_size_bytes{fstype!~"tmpfs|overlay|devtmpfs"})) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Critical disk usage on {{ $labels.instance }}"
+          description: >
+            Filesystem {{ $labels.mountpoint }} is {{ $value | printf "%.1f" }}% full.
+            Immediate action required.
+
+      - alert: NodeDiskWillFillIn4Hours
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|devtmpfs"}[1h], 4*3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Disk filling on {{ $labels.instance }} — estimated full in 4h"
+          description: >
+            Filesystem {{ $labels.mountpoint }} is predicted to run out of space
+            within 4 hours based on the current fill rate.
+
+      # ---- Disk I/O ----
+      - alert: NodeHighDiskIOUtilization
+        expr: |
+          rate(node_disk_io_time_seconds_total[5m]) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High disk I/O on {{ $labels.instance }}"
+          description: >
+            Disk {{ $labels.device }} on {{ $labels.instance }} has been
+            above 90% I/O utilization for 10 minutes.
+
+      # ---- Network ----
+      - alert: NodeNetworkHighReceive
+        expr: |
+          rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*|br.*"}[5m]) / 1024 / 1024 > 100
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High network receive on {{ $labels.instance }}"
+          description: >
+            Interface {{ $labels.device }} is receiving more than 100 MB/s.
+
+      # ---- System load ----
+      - alert: NodeHighLoadAverage
+        expr: |
+          node_load15 / count without(cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High 15-minute load average on {{ $labels.instance }}"
+          description: >
+            15-minute load average is {{ $value | printf "%.2f" }}x the number of CPUs.
+
+      # ---- Node availability ----
+      - alert: NodeDown
+        expr: up{job="node-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Node Exporter unreachable on {{ $labels.instance }}"
+          description: >
+            Node Exporter on {{ $labels.instance }} has been unreachable for 1 minute.
+            The host may be down or the exporter may have crashed.

@@ -1,0 +1,11 @@
+---
+# File-based service discovery targets
+# Prometheus reloads this file every 30s — no restart required
+# Add new scrape targets here without modifying prometheus.yml
+
+- targets:
+    - 'node-exporter:9100'
+  labels:
+    job: 'node-exporter-file-sd'
+    env: 'demo'
+    role: 'host'

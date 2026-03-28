@@ -1,0 +1,86 @@
+# ============================================================
+# Prometheus configuration
+# ============================================================
+
+global:
+  scrape_interval:     15s   # How often to scrape targets
+  evaluation_interval: 15s   # How often to evaluate alert rules
+  scrape_timeout:      10s
+
+  # Labels added to every time series and alert
+  external_labels:
+    cluster: 'local-observability'
+    environment: 'demo'
+
+# ---- Alertmanager integration ----
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+      timeout: 10s
+      api_version: v2
+
+# ---- Alert and recording rule files ----
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# ============================================================
+# Scrape configurations
+# ============================================================
+scrape_configs:
+
+  # -- Prometheus self-monitoring --
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # -- Alertmanager --
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  # -- Node Exporter (host OS metrics) --
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'local-host'
+
+  # -- cAdvisor (container resource metrics) --
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metric_relabel_configs:
+      # Drop high-cardinality container metrics not needed
+      - source_labels: [__name__]
+        regex: 'container_(network_tcp_usage_total|tasks_state|cpu_load_average_10s)'
+        action: drop
+
+  # -- Grafana --
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: /metrics
+
+  # -- Demo application --
+  - job_name: 'demo-app'
+    static_configs:
+      - targets: ['demo-app:8080']
+    metrics_path: /metrics
+    scrape_interval: 5s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: app
+        replacement: 'demo-app'
+
+  # -- File-based service discovery (for dynamic targets) --
+  - job_name: 'file-sd'
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/*.yml
+        refresh_interval: 30s

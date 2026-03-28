@@ -1,0 +1,5 @@
+prometheus-data/
+grafana-data/
+loki-data/
+alertmanager-data/
+*.log
