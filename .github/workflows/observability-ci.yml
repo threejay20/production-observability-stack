@@ -1,0 +1,133 @@
+name: Observability Stack CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-configs:
+    name: Validate Configurations
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install promtool
+        run: |
+          PROM_VERSION="2.51.2"
+          curl -sL \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz" \
+            | tar xz --strip-components=1 -C /tmp prometheus-${PROM_VERSION}.linux-amd64/promtool
+          sudo mv /tmp/promtool /usr/local/bin/promtool
+
+      - name: Validate docker-compose syntax
+        run: docker compose config --quiet
+
+      - name: promtool check config
+        run: promtool check config prometheus/prometheus.yml
+
+      - name: promtool check rules — app-alerts
+        run: promtool check rules prometheus/rules/app-alerts.yml
+
+      - name: promtool check rules — node-alerts
+        run: promtool check rules prometheus/rules/node-alerts.yml
+
+  smoke-test:
+    name: Stack Smoke Test
+    runs-on: ubuntu-latest
+    needs: validate-configs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build demo-app image
+        run: docker compose build demo-app
+
+      - name: Start core services
+        run: |
+          docker compose up -d \
+            alertmanager \
+            prometheus \
+            loki \
+            grafana \
+            demo-app
+
+      - name: Wait for Alertmanager
+        run: |
+          for i in $(seq 1 24); do
+            if curl -sf http://localhost:9093/-/healthy > /dev/null 2>&1; then
+              echo "Alertmanager healthy"
+              exit 0
+            fi
+            echo "Attempt $i/24 — waiting..."
+            sleep 5
+          done
+          echo "Alertmanager did not become healthy" && exit 1
+
+      - name: Wait for Prometheus
+        run: |
+          for i in $(seq 1 24); do
+            if curl -sf http://localhost:9090/-/healthy > /dev/null 2>&1; then
+              echo "Prometheus healthy"
+              exit 0
+            fi
+            echo "Attempt $i/24 — waiting..."
+            sleep 5
+          done
+          echo "Prometheus did not become healthy" && exit 1
+
+      - name: Wait for Loki
+        run: |
+          for i in $(seq 1 24); do
+            if curl -sf http://localhost:3100/ready 2>&1 | grep -q "ready"; then
+              echo "Loki ready"
+              exit 0
+            fi
+            echo "Attempt $i/24 — waiting..."
+            sleep 5
+          done
+          echo "Loki did not become ready" && exit 1
+
+      - name: Wait for Grafana
+        run: |
+          for i in $(seq 1 36); do
+            STATUS=$(curl -sf http://localhost:3000/api/health 2>/dev/null || echo "")
+            if echo "$STATUS" | grep -q '"database"'; then
+              echo "Grafana healthy: $STATUS"
+              exit 0
+            fi
+            echo "Attempt $i/36 — waiting..."
+            sleep 5
+          done
+          echo "Grafana did not become healthy" && exit 1
+
+      - name: Assert demo-app liveness
+        run: curl -sf http://localhost:8082/health/live
+
+      - name: Assert demo-app readiness
+        run: curl -sf http://localhost:8082/health/ready
+
+      - name: Assert Prometheus has active targets
+        run: |
+          TARGETS=$(curl -sf http://localhost:9090/api/v1/targets \
+            | jq '.data.activeTargets | length')
+          echo "Active targets: $TARGETS"
+          [ "$TARGETS" -gt 0 ] || (echo "No active targets found" && exit 1)
+
+      - name: Assert alert rule groups are loaded
+        run: |
+          GROUPS=$(curl -sf http://localhost:9090/api/v1/rules \
+            | jq '.data.groups | length')
+          echo "Rule groups loaded: $GROUPS"
+          [ "$GROUPS" -gt 0 ] || (echo "No rule groups loaded" && exit 1)
+
+      - name: Assert Alertmanager API is responding
+        run: |
+          STATUS=$(curl -sf http://localhost:9093/api/v2/status | jq -r '.cluster.status')
+          echo "Alertmanager cluster status: $STATUS"
+
+      - name: Print service logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
