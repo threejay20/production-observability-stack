@@ -112,22 +112,35 @@ jobs:
 
       - name: Assert Prometheus has active targets
         run: |
-          TARGETS=$(curl -s http://localhost:9090/api/v1/targets 2>/dev/null | jq -r '.data.activeTargets | length // 0' 2>/dev/null || echo "0")
+          HTTP=$(curl -s --max-time 5 http://localhost:9090/api/v1/targets 2>/dev/null || true)
+          TARGETS=$(printf '%s' "$HTTP" | jq '.data.activeTargets | length' 2>/dev/null || true)
+          TARGETS=$(printf '%s' "${TARGETS:-0}" | tr -cd '0-9')
+          TARGETS=${TARGETS:-0}
           echo "Active targets: $TARGETS"
-          [ "${TARGETS:-0}" -gt 0 ] || (echo "No active targets found" && exit 1)
+          [ "$TARGETS" -gt 0 ] || (echo "No active targets found" && exit 1)
 
       - name: Assert alert rule groups are loaded
         run: |
+          echo "Polling Prometheus rules API..."
           for i in $(seq 1 12); do
-            GROUPS=$(curl -s http://localhost:9090/api/v1/rules 2>/dev/null | jq -r '.data.groups | length // 0' 2>/dev/null || echo "0")
-            echo "Attempt $i/12 - rule groups: ${GROUPS:-0}"
-            if [ "${GROUPS:-0}" -gt 0 ]; then
-              echo "Alert rules loaded successfully"
+            HTTP=$(curl -s --max-time 5 http://localhost:9090/api/v1/rules 2>/dev/null || true)
+            GROUPS=$(printf '%s' "$HTTP" | jq '.data.groups | length' 2>/dev/null || true)
+            GROUPS=$(printf '%s' "${GROUPS:-0}" | tr -cd '0-9')
+            GROUPS=${GROUPS:-0}
+            echo "Attempt $i/12 - rule groups: $GROUPS"
+            if [ "$GROUPS" -gt 0 ]; then
+              echo "Alert rules loaded successfully ($GROUPS group(s))"
               exit 0
             fi
             sleep 5
           done
-          echo "No rule groups loaded after waiting" && exit 1
+          echo "=== Prometheus rules API (final state) ==="
+          curl -s http://localhost:9090/api/v1/rules 2>/dev/null | head -c 1000 || true
+          echo ""
+          echo "=== Prometheus container logs ==="
+          docker compose logs --tail=30 prometheus || true
+          echo "No rule groups loaded after 60s"
+          exit 1
 
       - name: Assert Alertmanager API is responding
         run: |
