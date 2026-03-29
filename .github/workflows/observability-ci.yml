@@ -112,21 +112,28 @@ jobs:
 
       - name: Assert Prometheus has active targets
         run: |
-          HTTP=$(curl -s --max-time 5 http://localhost:9090/api/v1/targets 2>/dev/null || true)
-          TARGETS=$(printf '%s' "$HTTP" | jq '.data.activeTargets | length' 2>/dev/null || true)
-          TARGETS=$(printf '%s' "${TARGETS:-0}" | tr -cd '0-9')
-          TARGETS=${TARGETS:-0}
+          set +eo pipefail
+          HTTP=$(curl -s --max-time 5 http://localhost:9090/api/v1/targets 2>/dev/null)
+          TARGETS=$(echo "$HTTP" | jq '.data.activeTargets | length' 2>/dev/null)
+          TARGETS=$(echo "${TARGETS:-0}" | grep -oE '^[0-9]+')
+          TARGETS="${TARGETS:-0}"
           echo "Active targets: $TARGETS"
-          [ "$TARGETS" -gt 0 ] || (echo "No active targets found" && exit 1)
+          if [ "$TARGETS" -gt 0 ]; then
+            echo "Active target check passed"
+          else
+            echo "No active targets found"
+            exit 1
+          fi
 
       - name: Assert alert rule groups are loaded
         run: |
+          set +eo pipefail
           echo "Polling Prometheus rules API..."
           for i in $(seq 1 12); do
-            HTTP=$(curl -s --max-time 5 http://localhost:9090/api/v1/rules 2>/dev/null || true)
-            GROUPS=$(printf '%s' "$HTTP" | jq '.data.groups | length' 2>/dev/null || true)
-            GROUPS=$(printf '%s' "${GROUPS:-0}" | tr -cd '0-9')
-            GROUPS=${GROUPS:-0}
+            HTTP=$(curl -s --max-time 5 http://localhost:9090/api/v1/rules 2>/dev/null)
+            GROUPS=$(echo "$HTTP" | jq '.data.groups | length' 2>/dev/null)
+            GROUPS=$(echo "${GROUPS:-0}" | grep -oE '^[0-9]+')
+            GROUPS="${GROUPS:-0}"
             echo "Attempt $i/12 - rule groups: $GROUPS"
             if [ "$GROUPS" -gt 0 ]; then
               echo "Alert rules loaded successfully ($GROUPS group(s))"
@@ -135,10 +142,10 @@ jobs:
             sleep 5
           done
           echo "=== Prometheus rules API (final state) ==="
-          curl -s http://localhost:9090/api/v1/rules 2>/dev/null | head -c 1000 || true
+          curl -s http://localhost:9090/api/v1/rules 2>/dev/null
           echo ""
           echo "=== Prometheus container logs ==="
-          docker compose logs --tail=30 prometheus || true
+          docker compose logs --tail=30 prometheus 2>/dev/null
           echo "No rule groups loaded after 60s"
           exit 1
 
